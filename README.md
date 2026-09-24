@@ -177,6 +177,6 @@ Skill-of-betting-prediction-of-Onmyoji/
 
 **Known limitations.** The simulator is a *heuristic comparative model*, not a re-implementation of the game engine. It does not model summons, multi-form transformations, assist attacks, damage chaining, or the precise timing of out-of-turn triggers; those are listed as "not modelled" in every run's output for the human to reason about. Absolute win rates should be treated as indicative; the ranking and the sensitivity analysis are where the value is.
 
-**Version anchor.** Knowledge-base content reflects the **10th-anniversary version "永恒之章·拾光永恒"** (live 2026-09-09), with an information cutoff of **2026-09-24**. Boss-set reclassification, shikigami rebalances and new releases after that date require incremental updates.
+**Version anchor.** Knowledge-base content reflects the **10th-anniversary version "永恒之章·拾光永恒"** (live 2026-09-09), with an information cutoff of **2026-09-24**. The latest balance adjustments are also contained (萤草,茨木童子,八岐大蛇等). Boss-set reclassification, shikigami rebalances and new releases after that date require incremental updates.
 
 **Disclaimer.** Content is AI-assisted and restricted to in-game data for reference only. This is a probabilistic reasoning aid, not an oracle — no responsibility is taken for any wager placed on the basis of its output. Wager responsibly.
