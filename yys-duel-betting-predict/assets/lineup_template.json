@@ -1,0 +1,221 @@
+{
+  "_schema": {
+    "说明": "对弈竞猜阵容输入文件。复制本文件后逐字段替换为界面上的真实数值。/ 所有数值均取【界面显示的对弈面板】口径（见知识库 01 §2.4 口径C）。",
+    "顶层字段": {
+      "max_unit_turns": "模拟上限（单位回合数）。默认 600。",
+      "arbiter_period": "裁决鬼王每多少个单位回合行动 1 次。默认 5（= 每轮 5 个式神各动一次）。数值越小 → 裁决之力叠得越快 → 越不利于纯奶/纯肉。",
+      "teams.red / teams.blue": "双方。每方 units 数组。"
+    },
+    "unit字段": {
+      "name": "式神名（用于识别座敷童子等特殊先机）。",
+      "pos": "1..5，界面给出的『阵容序号』。群攻顺序按 4→1→2→3→5 用它排序。必填，否则退化为按输入顺序。",
+      "role": "dps / control / support / healer / tank / fire / speed，仅用于报告分组。",
+      "atk / hp / def": "界面上的攻击 / 生命 / 防御。",
+      "spd": "界面上的速度。",
+      "crit": "界面上的暴击（百分数，如 85 表示 85%）。⚠️ <100 会被 preflight 警告『未满暴』。",
+      "cdmg": "界面上的暴击伤害（百分数，如 311 表示 311%）。",
+      "hit / res": "界面上的效果命中 / 效果抵抗（百分数）。",
+      "souls": "御魂套装名数组，如 [\"破势\",\"荒骷髅\"]。脚本内置效果表；首领御魂会被自动忽略并告警。",
+      "passive": {
+        "revive": "免死/复活次数（如石长姬 = 3）。",
+        "no_heal": "true = 无法被治疗（如百羽凤凰火）。",
+        "reduce": "常驻减伤，0.3 = 减伤 30%。",
+        "start_shield_pct": "开局护盾占自身最大生命比例。",
+        "dmg_mult": "技能/被动的常驻增伤倍率，1.8 = +80%。",
+        "on_death": "（预留）阵亡时触发的效果描述。"
+      },
+      "basic": "{name,cost,coef,hits,aoe,cd} —— 普攻，兜底用。",
+      "skills": [
+        {
+          "name": "技能名",
+          "cost": "鬼火消耗",
+          "coef": "★完整技能系数（598% → 5.98；268% → 2.68）。含义是技能说明里的那个百分比，不要乘段数。",
+          "main_coef": "可选：主目标系数，仅对第一个目标生效（如石长姬大招 598% 写这里、268% 写 coef）",
+          "hits": "段数（技能说明里的『N 次』）。控制概率会按 1-(1-p)^N 叠加。",
+          "aoe": "true = 群攻（按 4→1→2→3→5 选目标，命中全部存活敌方）",
+          "cd": "冷却（单位回合）",
+          "heal_pct": "可选：治疗，按施法者最大生命比例（0.15 = 15%）",
+          "shield_pct": "可选：护盾，按施法者最大生命比例",
+          "when": "always | ally_hp_below | ally_hp_above | enemy_has_control | self_hp_below —— 复刻知识库 06 §7.2 的 AI 判定条件",
+          "thr": "when 的阈值",
+          "control": {"type": "冰冻/眩晕/变形/沉默/沉睡/混乱/嘲讽/挑衅", "p": "基础概率小数", "turns": "持续回合", "single_roll": "true = 不按多段叠加（默认按 1-(1-p)^n）"}
+        }
+      ]
+    },
+    "已建模的御魂": ["阴摩罗","蝠翼","狰","轮入道","心眼","鸣屋","狂骨","兵主部","片叶之苇","破势","针女","网切","三味","伤魂鸟","镇墓兽","无刀取","被服","地藏像","涅槃之火","镜姬","钟灵","树妖","薙魂","夜啼石","叠叩","共潜","恶楼","涂佛","出世螺","奉海图","火之车","魅妖","雪幽魂","招财猫","反枕","日女巳时","珍珠","木魅","蚌精","火灵","遗念火","油赤子","贝吹坊","魍魉之匣","骰子鬼","幽谷响","返魂香","夜送犬","钓瓶火"],
+    "在名单内但机制未建模": ["元兴寺","应声虫","飞缘魔","青女房","隐念","雨降","贝吹坊（贝甲挡伤）","尘冢（人数差）","兵主部（层数节奏）"],
+    "对弈无效的御魂（会被忽略并告警）": ["荒骷髅","土蜘蛛","胧车","地震鲶","蜃气楼","鬼灵歌伎","夜荒魂","八咫镜","天羽羽斩","预言星盘","月之石","纺缘锤","稻荷穗箭"],
+    "名单外的御魂名（会被判为拼写错误）": ["凶骨","森罗","神乐铃","净火"],
+    "注": "「对弈无效」里的后 6 件（原星痕御魂）自 2026-04-15 起已被官方调整为首领御魂、不再支持斗技/结界突破/道馆 → 对弈同样不生效。见 05_御魂与套装.md §2.7b。",
+    "警告": "本文件中的数值是【示例占位】，不是真实面板。实盘请逐项替换为界面上看到的数字。"
+  },
+
+  "max_unit_turns": 600,
+  "arbiter_period": 5,
+
+  "teams": {
+    "red": {
+      "units": [
+        {
+          "name": "示例-供火辅助",
+          "pos": 5,
+          "role": "fire",
+          "atk": 2600, "hp": 26000, "def": 900, "spd": 195,
+          "crit": 40, "cdmg": 150, "hit": 60, "res": 90,
+          "souls": ["火灵", "招财猫"],
+          "passive": {},
+          "basic": {"name": "普攻", "cost": 0, "coef": 1.0, "hits": 1, "aoe": false, "cd": 0},
+          "skills": []
+        },
+        {
+          "name": "示例-群体控制",
+          "pos": 1,
+          "role": "control",
+          "atk": 3200, "hp": 17000, "def": 600, "spd": 210,
+          "crit": 60, "cdmg": 180, "hit": 150, "res": 60,
+          "souls": ["魅妖", "雪幽魂"],
+          "passive": {},
+          "basic": {"name": "普攻", "cost": 0, "coef": 0.33, "hits": 3, "aoe": false, "cd": 0},
+          "skills": [
+            {
+              "name": "群体控制",
+              "cost": 3, "coef": 0.60, "hits": 3, "aoe": true, "cd": 0,
+              "when": "always",
+              "control": {"type": "眩晕", "p": 0.15, "turns": 1}
+            }
+          ]
+        },
+        {
+          "name": "示例-单体输出",
+          "pos": 2,
+          "role": "dps",
+          "atk": 5924, "hp": 18459, "def": 723, "spd": 162,
+          "crit": 85, "cdmg": 311, "hit": 0, "res": 48,
+          "souls": ["网切"],
+          "passive": {"revive": 1},
+          "basic": {"name": "普攻", "cost": 0, "coef": 1.25, "hits": 1, "aoe": false, "cd": 0},
+          "skills": [
+            {
+              "name": "单体爆发",
+              "cost": 3, "coef": 6.2, "hits": 1, "aoe": false, "cd": 0,
+              "when": "always"
+            }
+          ]
+        },
+        {
+          "name": "示例-治疗",
+          "pos": 3,
+          "role": "healer",
+          "atk": 3000, "hp": 21352, "def": 800, "spd": 135,
+          "crit": 18, "cdmg": 234, "hit": 0, "res": 48,
+          "souls": ["树妖"],
+          "passive": {},
+          "basic": {"name": "普攻", "cost": 0, "coef": 1.0, "hits": 1, "aoe": false, "cd": 0},
+          "skills": [
+            {
+              "name": "群体治疗",
+              "cost": 2, "coef": 0.0, "hits": 1, "aoe": true, "cd": 0,
+              "heal_pct": 0.12, "when": "ally_hp_below", "thr": 0.75
+            }
+          ]
+        },
+        {
+          "name": "示例-坦克",
+          "pos": 4,
+          "role": "tank",
+          "atk": 3500, "hp": 30000, "def": 1100, "spd": 108,
+          "crit": 20, "cdmg": 150, "hit": 0, "res": 120,
+          "souls": ["镜姬", "地藏像"],
+          "passive": {"reduce": 0.15},
+          "basic": {"name": "普攻", "cost": 0, "coef": 1.0, "hits": 1, "aoe": false, "cd": 0},
+          "skills": []
+        }
+      ]
+    },
+
+    "blue": {
+      "units": [
+        {
+          "name": "示例-拉条",
+          "pos": 5,
+          "role": "speed",
+          "atk": 2800, "hp": 22000, "def": 700, "spd": 228,
+          "crit": 10, "cdmg": 150, "hit": 0, "res": 100,
+          "souls": ["招财猫"],
+          "passive": {},
+          "basic": {"name": "普攻", "cost": 0, "coef": 1.0, "hits": 1, "aoe": false, "cd": 0},
+          "skills": []
+        },
+        {
+          "name": "示例-群攻输出",
+          "pos": 1,
+          "role": "dps",
+          "atk": 4100, "hp": 15000, "def": 550, "spd": 158,
+          "crit": 100, "cdmg": 260, "hit": 0, "res": 30,
+          "souls": ["针女", "破势"],
+          "passive": {"revive": 0},
+          "basic": {"name": "普攻", "cost": 0, "coef": 1.0, "hits": 1, "aoe": false, "cd": 0},
+          "skills": [
+            {
+              "name": "群体多段",
+              "cost": 3, "coef": 0.85, "hits": 3, "aoe": true, "cd": 0,
+              "when": "always"
+            }
+          ]
+        },
+        {
+          "name": "示例-护盾辅助",
+          "pos": 2,
+          "role": "support",
+          "atk": 2680, "hp": 10254, "def": 353, "spd": 112,
+          "crit": 10, "cdmg": 150, "hit": 0, "res": 0,
+          "souls": ["蚌精"],
+          "passive": {"revive": 3, "no_heal": true},
+          "basic": {"name": "普攻", "cost": 0, "coef": 1.25, "hits": 1, "aoe": false, "cd": 0},
+          "skills": [
+            {
+              "name": "群体护盾",
+              "cost": 0, "coef": 0.0, "hits": 1, "aoe": true, "cd": 0,
+              "shield_pct": 0.6, "when": "always"
+            }
+          ]
+        },
+        {
+          "name": "示例-控制",
+          "pos": 3,
+          "role": "control",
+          "atk": 3300, "hp": 16000, "def": 620, "spd": 190,
+          "crit": 50, "cdmg": 160, "hit": 120, "res": 40,
+          "souls": ["钟灵", "魍魉之匣"],
+          "passive": {},
+          "basic": {"name": "普攻", "cost": 0, "coef": 1.0, "hits": 1, "aoe": false, "cd": 0},
+          "skills": [
+            {
+              "name": "单体点控",
+              "cost": 2, "coef": 2.4, "hits": 1, "aoe": false, "cd": 0,
+              "when": "always",
+              "control": {"type": "变形", "p": 0.6, "turns": 1, "single_roll": true}
+            }
+          ]
+        },
+        {
+          "name": "示例-收割",
+          "pos": 4,
+          "role": "dps",
+          "atk": 5200, "hp": 17000, "def": 700, "spd": 145,
+          "crit": 95, "cdmg": 290, "hit": 0, "res": 60,
+          "souls": ["心眼"],
+          "passive": {},
+          "basic": {"name": "普攻", "cost": 0, "coef": 1.0, "hits": 1, "aoe": false, "cd": 0},
+          "skills": [
+            {
+              "name": "收割",
+              "cost": 3, "coef": 4.8, "hits": 1, "aoe": false, "cd": 0,
+              "when": "always"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
