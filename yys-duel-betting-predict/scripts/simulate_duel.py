@@ -311,9 +311,16 @@ class Duel:
             if has_火灵:
                 self.fire[side] += 3
             # 座敷童子先机（可叠加）
+            # ⚠️ 必须精确匹配：SP「福悦座敷童子」的先机机制不同，不能用 `in` 匹配
             n_zd = sum(1 for u in units if u.name == "座敷童子")
             if n_zd:
                 self.fire[side] += 3 * n_zd
+            # ⚠️ SP 与本体同名不同人：出现复合名时提示人工确认
+            for u in units:
+                if u.name != "座敷童子" and "座敷童子" in u.name:
+                    self.warnings.append(
+                        f"[SP 去歧义] {u.name} 被识别为 SP 形态，本体是「座敷童子」"
+                        "——两者面板/技能不同，模拟按 SP 的输入面板与技能计算，请确认用的是哪个")
             # 蚌精：按携带者生命上限给全队护盾
             for u in units:
                 if "蚌精" in u.souls:
