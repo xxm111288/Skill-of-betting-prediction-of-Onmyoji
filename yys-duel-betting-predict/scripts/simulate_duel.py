@@ -26,6 +26,7 @@ import json
 import math
 import os
 import random
+import re
 import statistics
 import sys
 
@@ -51,8 +52,26 @@ ASSUMPTIONS = [
     "遗念火按常驻 +40% 抵抗、夜送犬按常驻 +80% 抵抗；纺缘锤已被移出建模（对弈无效）；"
     "元兴寺/应声虫/火之车的减费部分未建模。",
     "平局兜底：存活数多者胜 → 再比存活者剩余生命总和。",
-    "本模拟不建模：传导伤害、召唤物、多形态切换、协战、回合外触发的精确时序、"
-    "以及部分御魂的完整细节（见输出里的『机制未建模』告警）。这些请人工在报告里定性补充。",
+    "【已建模】天照「无灭」复制伤害（回声）：携带天晖的友方在自身回合造成技能伤害时，"
+    "天照以相同形式对相同敌方目标造成该技能系数 echo.coef（Lv.4=70%）的伤害；"
+    "天照需处于可行动状态（被硬控则跳过），每回合每友方至多结算一次。",
+    "【已建模】天照「神圣裁决」的天晖授予：使除自身外初始攻击最高的存活友方获得天晖 2 回合。",
+    "【已建模】以津真天「黄金羽」协战：目标须实际携带黄金羽（feather>0）才可能触发；"
+    "羽起始随机 1-3 层、以津真天回合开始补充、受击时把 1 层转给伤害来源（上限 3 层）。",
+    "本模拟不建模：传导伤害、召唤物、多形态切换、回合外触发的精确时序、"
+    "黄金羽的减疗/易伤与阵亡结算伤害、以及部分御魂的完整细节（见输出里的『机制未建模』告警）。"
+    "这些请人工在报告里定性补充。",
+    "⭐【被动守门（R9）】模拟器只读结构化参数（coef/hits/aoe/cd…）。凡传入的 "
+    "skills[].desc / passive 文案里**只有文字、没有数值**的被动与特殊机制，"
+    "都会触发 [被动未建模] / [机制未建模] 告警（关键词表见脚本顶部 _MECHANIC_KW）。"
+    "**这些告警必须逐条写进报告『未建模项』**，不得因为『没参数』就当作不存在。"
+    "已知必报：时之隙族（时之隙/时之缝/时之辉/时寂之刻）、玄血/形毁伤害、布都御魂、"
+    "以及 13 位『纯 prose 被动』式神（数珠/白藏主/久次良/紧那罗/空相面灵气/绘世花鸟卷/"
+    "须佐之男/初音未来/心友犬神/瑶音紧那罗/荒骷髅/妖刀姬·绯夜猎刃/思金神）。",
+    "【R10 控制口径】官方现行控制效果共 16 种；模拟器按「无法行动」（冰冻/沉睡/眩晕/变形/"
+    "深度冰冻/影缚/霜冻/拘魂/沉沦/冰眠，缴械近似并入）跳过行动，按不可驱散 9 种"
+    "（变形/眩晕/挑衅/深度冰冻/影缚/霜冻/拘魂/沉沦/冰眠）标记 hard。"
+    "霜冻无法被解除。口径见 kb/04 §3.3–§3.4。",
 ]
 
 # 首领御魂：2 件套被动仅在对怪物战斗时生效 → 对弈无效（知识库 05 §1.2 / §3）
@@ -65,6 +84,46 @@ ARENA_DISABLED_SOULS = {
     # 原星痕御魂（2026-04-15 起为首领御魂，PVP 不生效）
     "八咫镜", "天羽羽斩", "预言星盘", "月之石", "纺缘锤", "稻荷穗箭",
 }
+
+# ----------------------------------------------------------------------------
+# R9 被动守门：只有文字描述、没有数值参数的被动/机制 —— 模拟器天然会漏
+# ----------------------------------------------------------------------------
+# 判断某个技能文案属于「被动/机制类」（而非纯倍率伤害技能）的关键词
+_PASSIVE_LIKE_KW = (
+    "被动", "唯一效果", "先机", "印记", "永久", "不可驱散",
+    "回合结束时", "回合开始时", "战斗开始时", "行动后", "阵亡时", "阵亡后",
+)
+
+# 特殊机制关键词 → 说明。命中即告警「机制未建模」，并把对应指引写进报告。
+_MECHANIC_KW: dict[str, str] = {
+    "时之隙": "回合外行动：不计入回合统计、不推进鬼火条、不结算回合制冷却；"
+              "主动施放时拉条30%、伤害+40%（先机赋予则无拉条）。本模拟不建模，"
+              "见 04 §12.1 —— 时之体系会拖慢鬼火节奏，请人工定性补充",
+    "时之缝": "印记减益：无法被改变行动条、无法在回合外施放妖术与普攻。本模拟不建模（见 04 §12.1）",
+    "时之辉": "印记增益：场上至多2层、每人至多1层。本模拟不建模（见 04 §12.1）",
+    "时寂之刻": "印记：时曜泷夜叉姬 Lv.5 施加给自身外所有目标。本模拟不建模（见 04 §12.1）",
+    "布都御魂": "平将门专属计数器：每强化3次立即进入时之隙；攻击/防守架势按"
+               "「初始攻击 > 初始防御×700%」判定（见 04 §12.3）。本模拟不建模",
+    "玄血": "龙珏专属生命池：视为生命、被攻击时受到形毁伤害（无视防御与减伤）。"
+            "本模拟不建模 —— 纯护盾/减伤流会被绕过（见 04 §12.2）",
+    "形毁伤害": "龙珏玄血机制的补刀伤害：无视目标防御和减伤效果（见 04 §12.2）",
+    "真实伤害": "无视防御、一般不吃增减伤、可触发双方御魂但**不触发伤害来源被动**（见 04 §7.1）",
+    "固定伤害": "官方词条：伤害类型的一种，无视防御，不会暴击（见 04 §7.1）",
+    "间接伤害": "不触发双方御魂、目标防御为0时必定暴击、不被椒图/小袖分摊（见 04 §7.1）",
+    "传导伤害": "经链路（涓流/针/草人）二次转化。本模拟不建模（见 04 §7.2）",
+    "牺牲": "不经过「造成伤害」流程的直接扣血（如荒骷髅失去30%最大生命，见 04 §7.2）",
+    "放逐": "印记控制：无法动作、不可被选中、行动条锁定、被动与御魂失效、免疫伤害/治疗/增益/减益；"
+            "只有庇护能免疫。本模拟不建模（见 04 §5）",
+    "协战": "友方普攻时自己一起普攻同一目标 —— 本模拟只建模了以津真天黄金羽，其余协战未建模（见 04 §12.4）",
+    "邀战": "被邀战友方普攻同一目标（鸦天狗大招邀战还会解控）—— 本模拟不建模（见 04 §12.4）",
+}
+
+# 有数值参数的正则：百分比 / 倍率 / X层 / X点 / X回合 / X次 / X格
+_NUM_RE = re.compile(r"\d+(?:\.\d+)?\s*%|[×xX]\s*\d|\d+\s*(?:倍|层|点|回合|次|格|个|人)")
+
+# 技能可能出现在 spec 里的所有文本字段名（不同调用方命名不一致，全部覆盖）
+_SKILL_TEXT_KEYS = ("desc", "description", "text", "effect", "upgrade", "upgrades", "passive")
+_ALL_SKILL_KEYS = ("skills", "skill", "passives", "passive_desc", "mechanics")
 
 # 官方御魂名单全量 70 个（来源：g37simulator get_equip_list，2026-09-24 抓取）
 # 作用：区分「官方存在但本模拟未建模」与「名字写错了」。名单见 05A_御魂全量.md。
@@ -156,12 +215,18 @@ UNMODELED_SOULS = {
 
 CONTROL_KIND = {
     "冰冻": "skip", "沉睡": "skip", "眩晕": "skip", "变形": "skip",
+    # R10：官方现行 16 种控制里的扩展 7 种（见 kb/04 §3.3）
+    "深度冰冻": "skip", "影缚": "skip", "霜冻": "skip", "拘魂": "skip",
+    "沉沦": "skip", "冰眠": "skip",
+    "缴械": "skip",        # 近似：缴械=不能用技能也不能普攻 → 视为本回合无输出行为
     "沉默": "basic_only", "禁锢": "basic_only",
     "混乱": "random_target", "嘲讽": "taunt", "挑衅": "taunt",
     "减疗": "heal_down",
 }
-HARD_CONTROLS = {"变形", "眩晕", "挑衅"}
-SKIP_CONTROLS = {"冰冻", "沉睡", "眩晕", "变形"}
+# 不可驱散的 9 种（官方口径：16 种的后 9 种；霜冻还无法被解除）—— kb/04 §3.3
+HARD_CONTROLS = {"变形", "眩晕", "挑衅", "深度冰冻", "影缚", "霜冻", "拘魂", "沉沦", "冰眠"}
+# 「无法行动」= 到回合内不会有任何主动行为（kb/04 §3.4）；缴械按近似并入
+SKIP_CONTROLS = {"冰冻", "沉睡", "眩晕", "变形", "深度冰冻", "影缚", "霜冻", "拘魂", "沉沦", "冰眠", "缴械"}
 
 
 def clamp(x, lo, hi):
@@ -173,6 +238,7 @@ def clamp(x, lo, hi):
 # ----------------------------------------------------------------------------
 class Unit:
     def __init__(self, spec: dict, side: str, index: int, warnings: list):
+        self.raw_spec = spec or {}          # 原始输入留档（被动守门需要读未结构化的文案）
         self.side = side
         self.name = spec.get("name", f"{side}#{index+1}")
         self.pos = int(spec.get("pos", index + 1))          # 1..5 阵容序号
@@ -217,6 +283,15 @@ class Unit:
         self.start_shield_pct = float(p.get("start_shield_pct", 0.0))
         self.dmg_mult = float(p.get("dmg_mult", 1.0))          # 技能/被动增伤
         self.on_death_effects = p.get("on_death", []) or []
+        # 【回声/复制伤害】天照「无灭」：携带天晖的友方造成技能伤害时，
+        # 天照以相同形式对相同目标额外造成该伤害系数 echo_coef 倍的伤害。
+        self.echo = p.get("echo", None) or {}
+        # 【协战】以津真天「黄金羽」：携带黄金羽的敌方被普攻时，以津真天有
+        # assist_p 概率协战（对该目标追加一次自身普攻）。
+        # assist_feather_max：目标身上黄金羽层数上限（用于估算「带羽」覆盖率）。
+        self.assist_p = float(p.get("assist_p", 0.0))
+        self.assist_feather_max = int(p.get("assist_feather_max", 3))
+        self.assist_feather_start = int(p.get("assist_feather_start", 1))
 
         # —— 由御魂 flags 直接改面板/状态的部分 ——
         if "atk_mult" in self.flags:
@@ -242,6 +317,10 @@ class Unit:
         self.fallback_basic = spec.get("basic", {
             "name": "普攻", "cost": 0, "coef": 1.00, "hits": 1, "aoe": False, "cd": 0,
         })
+        # ⭐ 被动文字描述守门（R9）：只有文字没有参数化的被动/机制，模拟器天然会漏。
+        #    这里对传入的 skills[].desc 做一次扫描，命中就发 [被动未建模] / [机制未建模] 告警，
+        #    强制进入输出的 warnings 与报告「未建模项」，避免"悄无声息地漏掉"。
+        self._guard_unmodeled(warnings)
 
         # 运行时
         self.shield = self.max_hp * self.start_shield_pct
@@ -252,6 +331,75 @@ class Unit:
         self.turn_count = 0                 # 本式神行动次数（用于控制计时）
         self.kills = 0
         self.deaths_seen = 0
+        # —— 回声（天照「无灭」）运行时状态 ——
+        self.tianhui_left = 0               # 本式神身上的「天晖」剩余回合数
+        self._tianhui_used = False          # 本回合是否已因天晖触发过回声（每次限 1 次）
+        # —— 黄金羽运行时状态（被以津真天附加） ——
+        self.feather = 0                    # 当前携带的黄金羽层数
+
+    # -- 被动守门（R9）--
+    def _guard_unmodeled(self, warnings: list):
+        """扫描本式神传入的技能/被动文案，把「只有文字、没有参数」的项报出来。
+
+        背景：模拟器只能读结构化字段（coef/hits/aoe/cd…）。凡是**只有一段文字、
+        没有数值参数**的被动/机制（如「战斗开始时使攻击最高的友方获得血色之花」），
+        会被静默忽略。这里做三层扫描，命中即告警，强制进入报告的「未建模项」：
+
+          1. 特殊机制关键词（时之隙/布都御魂/玄血/真实伤害/固定伤害…）→ [机制未建模]
+          2. 被动/机制类文案（含"唯一效果/先机/回合开始…"）且**不含任何数值** → [被动未建模]
+          3. 结构化 skills 条目既无文案也无倍率参数 → [被动未建模]
+
+        设计原则：**宁可多报，不可漏报**。误报由人工在报告里筛掉即可。
+        """
+        seen: set[str] = set()
+
+        def emit(tag: str, name: str, text: str):
+            key = f"{tag}|{name}|{text[:40]}"
+            if key in seen:
+                return
+            seen.add(key)
+            snippet = (text or "").replace("\n", " ").strip()
+            if len(snippet) > 90:
+                snippet = snippet[:90] + "…"
+            warnings.append(f"[{tag}] {self.name} / {name}：{snippet}")
+
+        # 收集所有可能的文案：(标签名, 文本)
+        texts: list[tuple[str, str]] = []
+        for sk in self.skills:
+            if isinstance(sk, dict):
+                nm = sk.get("name") or sk.get("skill") or "（未命名技能）"
+                blob = " ".join(
+                    str(sk.get(k, "")) for k in _SKILL_TEXT_KEYS if sk.get(k)
+                )
+                has_param = any(
+                    sk.get(k) is not None
+                    for k in ("coef", "hits", "aoe", "heal", "shield", "effects")
+                )
+                if blob and not has_param:
+                    # 3. 有文案但没有任何倍率/效果参数 → 结构化不可用
+                    emit("被动未建模", nm, blob)
+                if blob:
+                    texts.append((nm, blob))
+            elif isinstance(sk, str):
+                texts.append(("（技能）", sk))
+        # 其它可能塞文案的字段（调用方自定义）
+        for key in ("passive_desc", "mechanics", "notes"):
+            raw = self.raw_spec.get(key)
+            if isinstance(raw, str) and raw.strip():
+                texts.append((key, raw))
+        for k, v in (self.raw_spec.get("passive") or {}).items():
+            if isinstance(v, str) and v.strip():
+                texts.append((f"passive.{k}", v))
+
+        # 1 + 2：对每段文案做关键词 / 纯 prose 判定
+        for nm, text in texts:
+            hit_mech = [kw for kw in _MECHANIC_KW if kw in text]
+            if hit_mech:
+                for kw in hit_mech:
+                    emit("机制未建模", f"{nm}（{kw}）", _MECHANIC_KW[kw])
+                continue
+            if any(k in text for k in _PASSIVE_LIKE_KW) and not _NUM_RE.search(text):
+                emit("被动未建模", nm, text)
 
     # -- 状态辅助 --
     @property
@@ -300,6 +448,15 @@ class Duel:
         self.unit_turns = 0
         self.log: list[str] = []
         self._depth = 0            # 反击嵌套深度护栏
+
+        # 黄金羽资源池开局初始化（以津真天「回合开始时获得随机1-3层」，
+        # 开局视为已获得一层，否则开局至其首次行动前羽层恒为 0、
+        # 会导致「受到伤害时转羽」与「协战」在整局中完全无法触发）
+        for side, units in self.teams.items():
+            for u in units:
+                if u.assist_p > 0 and u.assist_feather_max > 0:
+                    u._feather_pool = self.rng.randint(
+                        max(1, u.assist_feather_start), u.assist_feather_max)
 
         # 开局鬼火与护盾
         self.fire = {s: 4.0 for s in ("red", "blue")}
@@ -546,6 +703,9 @@ class Duel:
                 for a in self.teams[tgt.side]:
                     if a.alive and a is not tgt and self.rng.random() < ap:
                         a.shield += tgt.max_hp * pct
+        # 黄金羽：以津真天受到伤害时，1 层羽转给伤害者（上限 3 层）
+        if (dmg_hp + dmg_shield) > 0 and tgt.assist_p > 0:
+            self._grant_feather_from_damage(tgt, atk)
         # 受击眩晕（返魂香）：需造成对血量伤害，且不能被护盾吃掉
         if dealt_to_hp and dmg_shield == 0.0 and "on_being_hit_control" in tgt.flags:
             cname, cp = tgt.flags["on_being_hit_control"]
@@ -699,6 +859,8 @@ class Duel:
         u.turn_count += 1
         for k in list(u.cds):
             u.cds[k] = max(0, u.cds[k] - 1)
+        # 以津真天回合开始：补充黄金羽层数
+        self._refill_feather(u.side)
         # 控制结算
         skips = u.is_controlled_skip()
         random_target = any(c["name"] == "混乱" for c in u.controls)
@@ -766,10 +928,27 @@ class Duel:
             self._resolve_support(u, sk, enemy_side)
         else:
             self._resolve_damage(u, sk, targets, enemy_side)
+            # 以津真天「黄金羽」协战：普攻命中带黄金羽的敌方时，以津真天有
+            # assist_p 概率协战（对该目标追加一次自身普攻）。
+            # ⚠️ 近似：「黄金羽」的层数/debuff 未建模，默认把所有被普攻命中的
+            #    敌方都视为「带有黄金羽」，因此协战概率取满。
+            if idx == -1:
+                self._resolve_assist(u, targets)
 
         self._post_turn_souls(u, used_basic=(idx == -1),
                              dealt_damage=(not is_support and float(sk.get("coef", 0)) > 0))
+        # 天照三技能：使除自身外初始攻击最高的友方获得天晖（维持 2 回合）
+        if sk.get("grant_tianhui") and not is_support:
+            self._grant_tianhui(u.side)
+        if u.echo.get("enabled"):
+            u._tianhui_used = False            # 天照自身回合结束也重置回声开关
         self.expire_controls(u)
+        # 本式神回合结束：其天晖计时 -1、回声开关重置
+        if u.tianhui_left > 0 and not u.echo.get("enabled"):
+            u.tianhui_left -= 1
+            if u.tianhui_left == 0:
+                self.log.append(f"     ⊘ {u.name} 的天晖失效")
+        u._tianhui_used = False
 
     def _post_turn_souls(self, u: Unit, used_basic: bool, dealt_damage: bool):
         """回合结束类御魂：共潜（驱散）、涂佛（普攻/被控则给全队 buff）"""
@@ -802,8 +981,18 @@ class Duel:
         allies = [a for a in self.teams[u.side] if a.alive]
         if sk.get("shield_pct"):
             amt = u.max_hp * float(sk["shield_pct"])
-            for a in allies:
-                a.shield += amt
+            scope = sk.get("shield_scope")
+            if scope == "self_plus_top2_cdmg":
+                # 雪女「冰甲术」：自身 + 暴击伤害最高的 2 位友方
+                others = sorted([a for a in allies if a is not u],
+                                key=lambda a: -a.cdmg)[:2]
+                targets = [u] + [a for a in others if a.alive]
+                for a in targets:
+                    a.shield += amt
+                self.log.append(f"     ↳ 冰甲盾 → {[a.name for a in targets]}")
+            else:
+                for a in allies:
+                    a.shield += amt
         if sk.get("heal_pct"):
             base = u.max_hp * float(sk["heal_pct"])
             crit = self.rng.random() < u.crit
@@ -856,6 +1045,143 @@ class Duel:
                                   int(ctrl.get("turns", 1)),
                                   "hard" if ctrl["type"] in HARD_CONTROLS else "soft",
                                   n_rolls=n_rolls)
+
+        # 天照「无灭」回声：本式神若携带天晖，其技能伤害会被天照以相同形式复制
+        if u.tianhui_left > 0 and not u._tianhui_used:
+            self._resolve_echo(u, sk, targets)
+
+    def _resolve_echo(self, src: Unit, sk, targets):
+        """天照「无灭」：携带天晖的友方造成技能伤害时，
+        天照以相同形式对相同目标额外造成该伤害系数 echo_coef 倍的伤害。
+
+        近似说明（已在报告『未建模项』列出）：
+          · 按【目标当前存活】重算，不复刻逐段命中时序；
+          · 「相同形式」对群攻按同样命中全体处理；
+          · 每次行动限 1 次（即使被多段/多次命中也不再追加）。
+        """
+        tianzhao = None
+        for a in self.teams[src.side]:
+            if a.echo.get("enabled") and a.alive:
+                tianzhao = a
+                break
+        if tianzhao is None:
+            # 天照不可行动（阵亡/被控跳过）→ 回声不触发
+            return
+        if tianzhao.is_controlled_skip():
+            return
+        coef = float(sk.get("coef", 1.0) or 0.0)
+        if coef <= 0:
+            return                                   # 纯辅助技能不复制
+        src._tianhui_used = True
+        c = coef * float(tianzhao.echo.get("coef", 0.55))
+        hits = int(sk.get("hits", 1))
+        echo_targets = targets if sk.get("aoe") else targets[:1]
+        self.log.append(
+            f"     ✧ 天晖回声：{src.name} → 天照复制 {sk.get('name','?')} "
+            f"（系数 {coef:.2f}×{tianzhao.echo.get('coef',0.55):.2f}={c:.3f}，{hits} 段）")
+        for tgt in echo_targets:
+            if not tgt.alive:
+                continue
+            dmg_hp, dmg_sh, crit = self.real_damage(tianzhao, tgt, c, hits)
+            dealt = self.apply_damage(tianzhao, tgt, dmg_hp, dmg_sh, crit, self.warnings)
+            # 天照自身带针女/网切等，按同样规则结算（只认对血量伤害）
+            if dealt and crit and "proc" in tianzhao.flags:
+                if self.rng.random() < tianzhao.flags["proc"]:
+                    true_dmg = min(tgt.max_hp * tianzhao.flags["hp_pct"],
+                                   tianzhao.atk * tianzhao.flags["cap_atk_mult"])
+                    self._raw_lose_hp(tgt, true_dmg, "针女")
+                    self.log.append(f"     ✦ 回声触发针女真伤 {true_dmg:.0f} → {tgt.name}")
+
+    def _resolve_assist(self, attacker: Unit, targets):
+        """协战：当「带有黄金羽」的敌方目标被我方普攻命中时，
+        己方持有 assist_p 的单位有 assist_p 概率协战，对该目标追加一次自身普攻。
+
+        黄金羽覆盖模型（近似）：
+          · 以津真天每回合开始随机获得 assist_feather_start..assist_feather_max 层；
+          · 以津真天受到伤害时，1 层转给伤害者（上限 assist_feather_max 层）；
+          · 「带羽」是按【目标】判定的 —— 敌方身上的羽来自其攻击以津真天，
+            因此必须先挨过以津真天的反击才会带上羽，初期覆盖率天然较低。
+        ⚠️ 仍未建模：羽层的减疗/易伤效果、阵亡时按层数结算的伤害。
+        """
+        helper_side = "blue" if attacker.side == "red" else "red"
+        tgt = targets[0] if targets else None
+        if tgt is None or not tgt.alive:
+            return
+        for helper in self.teams[helper_side]:
+            if helper.assist_p <= 0 or not helper.alive or helper is tgt:
+                continue
+            if helper.is_controlled_skip():
+                continue
+            # 只有「带羽」的目标才会引发协战
+            if tgt.feather <= 0:
+                continue
+            if self.rng.random() >= helper.assist_p:
+                continue
+            bs = helper.fallback_basic
+            self.log.append(
+                f"     ⚔ 协战：{helper.name} 追击 {tgt.name}"
+                f"（羽{tgt.feather}层，「{bs.get('name','普攻')}」"
+                f"{float(bs.get('coef',1.0)):.2f}）")
+            dmg_hp, dmg_sh, crit = self.real_damage(
+                helper, tgt, float(bs.get("coef", 1.0)),
+                int(bs.get("hits", 1)))
+            dealt = self.apply_damage(helper, tgt, dmg_hp, dmg_sh, crit,
+                                      self.warnings)
+            if dealt and crit and "proc" in helper.flags:
+                if self.rng.random() < helper.flags["proc"]:
+                    true_dmg = min(tgt.max_hp * helper.flags["hp_pct"],
+                                   helper.atk * helper.flags["cap_atk_mult"])
+                    self._raw_lose_hp(tgt, true_dmg, "针女")
+                    self.log.append(
+                        f"     ✦ 协战触发针女真伤 {true_dmg:.0f} → {tgt.name}")
+
+    def _grant_feather_from_damage(self, victim: Unit, attacker: Unit):
+        """以津真天「受到伤害时，将 1 层黄金羽转为附加至伤害者，上限 3 层」。
+
+        以津真天自身的羽层即资源池：每回合开始补充，受到伤害时消耗 1 层
+        并把羽转给伤害者。注意 owner 就是 victim 本身（羽长在以津真天身上），
+        因此不能把 owner is victim 当作异常分支排除。
+        """
+        owner = None
+        for a in self.teams[victim.side]:
+            if a.assist_p > 0 and a.assist_feather_max > 0 and a.alive:
+                owner = a
+                break
+        # 只有「以津真天自己被伤害」才会转羽
+        if owner is None or owner is not victim or attacker is None:
+            return
+        if getattr(owner, "_feather_pool", 0) <= 0:
+            return
+        owner._feather_pool -= 1
+        if attacker.feather < owner.assist_feather_max:
+            attacker.feather += 1
+            self.log.append(f"     ✽ {attacker.name} 获得黄金羽 {attacker.feather} 层")
+
+    def _refill_feather(self, side):
+        """以津真天回合开始：随机获得 1–3 层黄金羽（充入其羽层资源池）。
+
+        层数按上限 assist_feather_max 叠加上限处理，不是每回合清零重掷。
+        """
+        for a in self.teams[side]:
+            if a.assist_p > 0 and a.assist_feather_max > 0 and a.alive:
+                gain = self.rng.randint(max(1, a.assist_feather_start),
+                                        a.assist_feather_max)
+                a._feather_pool = min(
+                    a.assist_feather_max,
+                    getattr(a, "_feather_pool", 0) + gain)
+
+    def _grant_tianhui(self, side):
+        """三技能附带的『使除自身外的友方初始攻击最高的式神获得天晖』。"""
+        tianzhao = next((a for a in self.teams[side]
+                         if a.echo.get("enabled") and a.alive), None)
+        if tianzhao is None:
+            return
+        cands = [a for a in self.teams[side] if a.alive and a is not tianzhao]
+        if not cands:
+            return
+        best = max(cands, key=lambda a: a.base_atk)
+        best.tianhui_left = max(best.tianhui_left, 2)
+        self.log.append(f"     ☀ {best.name} 获得天晖（维持 2 回合）")
 
     def _soul_control(self, u: Unit, tgt: Unit, sk):
         f = u.flags
