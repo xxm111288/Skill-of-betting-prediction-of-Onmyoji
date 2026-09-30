@@ -506,12 +506,15 @@ class Duel:
             self.prog[u] = clamp(u.base_spd / smax, 0.0, 1.0)
 
     # ---------------- 裁决之力 ----------------
+    # 官方口径（2018-08-29 公告）：每层 造成伤害+15% / 治疗量-10%（无上限累加）；
+    # 鬼王第11次行动起进入究极之刻，『裁决之力』伤害加成由15%改为30%/层（整个buff效果改值，治疗削减不变）。
+    # 大神实测：究极之刻后治疗 3万→13→9→1，即减疗无封顶、治疗趋近 0。
     def dmg_bonus(self):
         per = 0.30 if self.arbiter_actions >= 11 else 0.15
         return per * self.layers
 
     def heal_reduction(self):
-        return clamp(0.10 * self.layers, 0.0, 0.95)
+        return clamp(0.10 * self.layers, 0.0, 1.0)
 
     def arbiter_tick(self):
         if self.unit_turns % self.arbiter_period == 0:
